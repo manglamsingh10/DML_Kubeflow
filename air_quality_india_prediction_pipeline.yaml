@@ -1,0 +1,1031 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: air-quality-india-prediction-pipeline-
+  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.22, pipelines.kubeflow.org/pipeline_compilation_time: '2024-08-30T18:16:06.166230',
+    pipelines.kubeflow.org/pipeline_spec: '{"description": "An pipeline for Air quality
+      india prediction pipeline with TensorFlow and Kubeflow", "inputs": [{"default":
+      "1", "name": "epochs", "optional": true, "type": "Integer"}], "name": "Air quality
+      india prediction pipeline"}'}
+  labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.22}
+spec:
+  entrypoint: air-quality-india-prediction-pipeline
+  templates:
+  - name: air-quality-india-prediction-pipeline
+    dag:
+      tasks:
+      - name: calculate-rmse-r2score
+        template: calculate-rmse-r2score
+        dependencies: [predict, shared-pv-20240830181606]
+        arguments:
+          parameters:
+          - {name: shared-pv-20240830181606-name, value: '{{tasks.shared-pv-20240830181606.outputs.parameters.shared-pv-20240830181606-name}}'}
+      - name: hyperparameter-tune
+        template: hyperparameter-tune
+        dependencies: [shared-pv-20240830181606, train-model]
+        arguments:
+          parameters:
+          - {name: shared-pv-20240830181606-name, value: '{{tasks.shared-pv-20240830181606.outputs.parameters.shared-pv-20240830181606-name}}'}
+      - name: load-dataset-and-preprocess
+        template: load-dataset-and-preprocess
+        dependencies: [shared-pv-20240830181606]
+        arguments:
+          parameters:
+          - {name: shared-pv-20240830181606-name, value: '{{tasks.shared-pv-20240830181606.outputs.parameters.shared-pv-20240830181606-name}}'}
+      - name: model-serving
+        template: model-serving
+        dependencies: [calculate-rmse-r2score, shared-pv-20240830181606]
+        arguments:
+          parameters:
+          - {name: shared-pv-20240830181606-name, value: '{{tasks.shared-pv-20240830181606.outputs.parameters.shared-pv-20240830181606-name}}'}
+      - name: predict
+        template: predict
+        dependencies: [hyperparameter-tune, shared-pv-20240830181606]
+        arguments:
+          parameters:
+          - {name: shared-pv-20240830181606-name, value: '{{tasks.shared-pv-20240830181606.outputs.parameters.shared-pv-20240830181606-name}}'}
+      - {name: shared-pv-20240830181606, template: shared-pv-20240830181606}
+      - name: train-model
+        template: train-model
+        dependencies: [shared-pv-20240830181606, train-test-split]
+        arguments:
+          parameters:
+          - {name: shared-pv-20240830181606-name, value: '{{tasks.shared-pv-20240830181606.outputs.parameters.shared-pv-20240830181606-name}}'}
+      - name: train-test-split
+        template: train-test-split
+        dependencies: [load-dataset-and-preprocess, shared-pv-20240830181606]
+        arguments:
+          parameters:
+          - {name: shared-pv-20240830181606-name, value: '{{tasks.shared-pv-20240830181606.outputs.parameters.shared-pv-20240830181606-name}}'}
+  - name: calculate-rmse-r2score
+    container:
+      args: [--predictions-path, /mnt/data/output/prediction/predictions.npz]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def calculate_rmse_r2score(predictions_path):
+            import numpy as np
+            from pathlib import Path
+            from sklearn.metrics import r2_score
+
+            print("***Starting pipeline component to calculate model RMSE and R2 Score***")
+
+            predictions_path_path = Path(predictions_path)
+            predictions_path_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Load predictions and test labels
+            data = np.load(predictions_path)
+            lstm_predictions, y_test = data['lstm_predictions'], data['y_test']
+            print(f"Model predictions is loaded from: {predictions_path}")
+
+            # RMSE and R2 score for regression model
+            lstm_rmse = np.sqrt(np.mean(lstm_predictions - y_test) ** 2)
+
+            r2_lstm = r2_score(y_test, lstm_predictions)
+
+            print("Accuracy: ")
+            print(f"RMSE: {lstm_rmse} and R2: {r2_lstm}")
+
+            print("***Completed pipeline component to calculate model RMSE and R2 Score***")
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Calculate rmse r2score', description='')
+        _parser.add_argument("--predictions-path", dest="predictions_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = calculate_rmse_r2score(**_parsed_args)
+      image: manglamsingh10/base-pod:latest
+      volumeMounts:
+      - {mountPath: /mnt/data, name: shared-pv-20240830181606}
+    inputs:
+      parameters:
+      - {name: shared-pv-20240830181606-name}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.22
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--predictions-path", {"inputValue": "predictions_path"}], "command":
+          ["sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3
+          -u \"$program_path\" \"$@\"\n", "def calculate_rmse_r2score(predictions_path):\n    import
+          numpy as np\n    from pathlib import Path\n    from sklearn.metrics import
+          r2_score\n\n    print(\"***Starting pipeline component to calculate model
+          RMSE and R2 Score***\")\n\n    predictions_path_path = Path(predictions_path)\n    predictions_path_path.parent.mkdir(parents=True,
+          exist_ok=True)\n\n    # Load predictions and test labels\n    data = np.load(predictions_path)\n    lstm_predictions,
+          y_test = data[''lstm_predictions''], data[''y_test'']\n    print(f\"Model
+          predictions is loaded from: {predictions_path}\")\n\n    # RMSE and R2 score
+          for regression model\n    lstm_rmse = np.sqrt(np.mean(lstm_predictions -
+          y_test) ** 2)\n\n    r2_lstm = r2_score(y_test, lstm_predictions)\n\n    print(\"Accuracy:
+          \")\n    print(f\"RMSE: {lstm_rmse} and R2: {r2_lstm}\")\n\n    print(\"***Completed
+          pipeline component to calculate model RMSE and R2 Score***\")\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Calculate rmse r2score'',
+          description='''')\n_parser.add_argument(\"--predictions-path\", dest=\"predictions_path\",
+          type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
+          = calculate_rmse_r2score(**_parsed_args)\n"], "image": "manglamsingh10/base-pod:latest"}},
+          "inputs": [{"name": "predictions_path", "type": "String"}], "name": "Calculate
+          rmse r2score"}', pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"predictions_path":
+          "/mnt/data/output/prediction/predictions.npz"}'}
+    volumes:
+    - name: shared-pv-20240830181606
+      persistentVolumeClaim: {claimName: '{{inputs.parameters.shared-pv-20240830181606-name}}'}
+  - name: hyperparameter-tune
+    container:
+      args: [--experiment-trial-name, Air Quality Predict Exp, --obj-metric-name,
+        r2_score]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def hyperparameter_tune(experiment_trial_name, obj_metric_name):
+            from kubeflow.katib import KatibClient, V1beta1ExperimentSpec, V1beta1AlgorithmSpec, V1beta1ObjectiveSpec, \
+                V1beta1ParameterSpec, V1beta1TrialTemplate, V1beta1TrialTemplateSpec, V1beta1TrialParameterSpec, \
+                V1beta1FeasibleSpace
+
+            print("***Starting pipeline component for hyper parameter tuning***")
+            experiment_name = experiment_trial_name
+
+            # Define the objective
+            objective_spec = V1beta1ObjectiveSpec(
+                type="maximize",
+                goal=0.9,
+                objective_metric_name=obj_metric_name
+            )
+
+            # Define the algorithm
+            algorithm_spec = V1beta1AlgorithmSpec(
+                algorithm_name="random"
+            )
+
+            # Define the hyperparameters to tune
+            parameters_spec = [
+                V1beta1ParameterSpec(
+                    name="learning_rate",
+                    parameter_type="double",
+                    feasible_space=V1beta1FeasibleSpace(min="0.01", max="0.1")
+                ),
+                V1beta1ParameterSpec(
+                    name="batch_size",
+                    parameter_type="int",
+                    feasible_space=V1beta1FeasibleSpace(min="32", max="128")
+                ),
+            ]
+
+            # Define the trial template
+            trial_template_spec = V1beta1TrialTemplateSpec(
+                primary_container_name="training-container",
+                trial_parameters=[
+                    V1beta1TrialParameterSpec(
+                        name="learning_rate",
+                        description="Learning rate for the model",
+                        reference="learning_rate"
+                    ),
+                    V1beta1TrialParameterSpec(
+                        name="batch_size",
+                        description="Batch size",
+                        reference="batch_size"
+                    ),
+                ],
+                trial_spec={
+                    "apiVersion": "batch/v1",
+                    "kind": "Job",
+                    "spec": {
+                        "template": {
+                            "spec": {
+                                "containers": [
+                                    {
+                                        "name": "training-container",
+                                        "image": "your-training-image",
+                                        "command": [
+                                            "python", "train.py",
+                                            "--learning_rate=$(trialParameters.learning_rate)",
+                                            "--batch_size=$(trialParameters.batch_size)"
+                                        ],
+                                    }
+                                ],
+                                "restartPolicy": "Never"
+                            }
+                        }
+                    }
+                }
+            )
+
+            experiment_spec = V1beta1ExperimentSpec(
+                objective=objective_spec,
+                algorithm=algorithm_spec,
+                parameters=parameters_spec,
+                trial_template=V1beta1TrialTemplate(trial_template_spec=trial_template_spec)
+            )
+
+            # Create the experiment
+            katib_client = KatibClient()
+            katib_client.create_experiment(
+                experiment_name=experiment_name,
+                namespace="kubeflow",
+                experiment_spec=experiment_spec
+            )
+            print(f"Experiment {experiment_trial_name} submitted.")
+
+            print("***Completed pipeline component for hyper parameter tuning***")
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Hyperparameter tune', description='')
+        _parser.add_argument("--experiment-trial-name", dest="experiment_trial_name", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--obj-metric-name", dest="obj_metric_name", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = hyperparameter_tune(**_parsed_args)
+      image: manglamsingh10/base-pod:latest
+      volumeMounts:
+      - {mountPath: /mnt/data, name: shared-pv-20240830181606}
+    inputs:
+      parameters:
+      - {name: shared-pv-20240830181606-name}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.22
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--experiment-trial-name", {"inputValue": "experiment_trial_name"},
+          "--obj-metric-name", {"inputValue": "obj_metric_name"}], "command": ["sh",
+          "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3
+          -u \"$program_path\" \"$@\"\n", "def hyperparameter_tune(experiment_trial_name,
+          obj_metric_name):\n    from kubeflow.katib import KatibClient, V1beta1ExperimentSpec,
+          V1beta1AlgorithmSpec, V1beta1ObjectiveSpec, \\\n        V1beta1ParameterSpec,
+          V1beta1TrialTemplate, V1beta1TrialTemplateSpec, V1beta1TrialParameterSpec,
+          \\\n        V1beta1FeasibleSpace\n\n    print(\"***Starting pipeline component
+          for hyper parameter tuning***\")\n    experiment_name = experiment_trial_name\n\n    #
+          Define the objective\n    objective_spec = V1beta1ObjectiveSpec(\n        type=\"maximize\",\n        goal=0.9,\n        objective_metric_name=obj_metric_name\n    )\n\n    #
+          Define the algorithm\n    algorithm_spec = V1beta1AlgorithmSpec(\n        algorithm_name=\"random\"\n    )\n\n    #
+          Define the hyperparameters to tune\n    parameters_spec = [\n        V1beta1ParameterSpec(\n            name=\"learning_rate\",\n            parameter_type=\"double\",\n            feasible_space=V1beta1FeasibleSpace(min=\"0.01\",
+          max=\"0.1\")\n        ),\n        V1beta1ParameterSpec(\n            name=\"batch_size\",\n            parameter_type=\"int\",\n            feasible_space=V1beta1FeasibleSpace(min=\"32\",
+          max=\"128\")\n        ),\n    ]\n\n    # Define the trial template\n    trial_template_spec
+          = V1beta1TrialTemplateSpec(\n        primary_container_name=\"training-container\",\n        trial_parameters=[\n            V1beta1TrialParameterSpec(\n                name=\"learning_rate\",\n                description=\"Learning
+          rate for the model\",\n                reference=\"learning_rate\"\n            ),\n            V1beta1TrialParameterSpec(\n                name=\"batch_size\",\n                description=\"Batch
+          size\",\n                reference=\"batch_size\"\n            ),\n        ],\n        trial_spec={\n            \"apiVersion\":
+          \"batch/v1\",\n            \"kind\": \"Job\",\n            \"spec\": {\n                \"template\":
+          {\n                    \"spec\": {\n                        \"containers\":
+          [\n                            {\n                                \"name\":
+          \"training-container\",\n                                \"image\": \"your-training-image\",\n                                \"command\":
+          [\n                                    \"python\", \"train.py\",\n                                    \"--learning_rate=$(trialParameters.learning_rate)\",\n                                    \"--batch_size=$(trialParameters.batch_size)\"\n                                ],\n                            }\n                        ],\n                        \"restartPolicy\":
+          \"Never\"\n                    }\n                }\n            }\n        }\n    )\n\n    experiment_spec
+          = V1beta1ExperimentSpec(\n        objective=objective_spec,\n        algorithm=algorithm_spec,\n        parameters=parameters_spec,\n        trial_template=V1beta1TrialTemplate(trial_template_spec=trial_template_spec)\n    )\n\n    #
+          Create the experiment\n    katib_client = KatibClient()\n    katib_client.create_experiment(\n        experiment_name=experiment_name,\n        namespace=\"kubeflow\",\n        experiment_spec=experiment_spec\n    )\n    print(f\"Experiment
+          {experiment_trial_name} submitted.\")\n\n    print(\"***Completed pipeline
+          component for hyper parameter tuning***\")\n\nimport argparse\n_parser =
+          argparse.ArgumentParser(prog=''Hyperparameter tune'', description='''')\n_parser.add_argument(\"--experiment-trial-name\",
+          dest=\"experiment_trial_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--obj-metric-name\",
+          dest=\"obj_metric_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = hyperparameter_tune(**_parsed_args)\n"],
+          "image": "manglamsingh10/base-pod:latest"}}, "inputs": [{"name": "experiment_trial_name",
+          "type": "String"}, {"name": "obj_metric_name", "type": "String"}], "name":
+          "Hyperparameter tune"}', pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"experiment_trial_name":
+          "Air Quality Predict Exp", "obj_metric_name": "r2_score"}'}
+    volumes:
+    - name: shared-pv-20240830181606
+      persistentVolumeClaim: {claimName: '{{inputs.parameters.shared-pv-20240830181606-name}}'}
+  - name: load-dataset-and-preprocess
+    container:
+      args: [--minio-src-dataset-path, dataset/air-quality-india.csv, --src-data-path,
+        /mnt/data/dataset/air-quality-india.csv, --out-data-path, /mnt/data/dataset/processed_dataset]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def load_dataset_and_preprocess(minio_src_dataset_path, src_data_path, out_data_path):
+            import pandas as pd
+            from pathlib import Path
+            from minio import Minio
+
+            print("***Staring pipeline component to load air quality dataset***")
+
+            # Create the directory if it does not exist
+            src_data_path_path = Path(src_data_path)
+            src_data_path_path.parent.mkdir(parents=True, exist_ok=True)
+
+            out_data_path_path = Path(out_data_path)
+            out_data_path_path.parent.mkdir(parents=True, exist_ok=True)
+
+            print("Connecting to minio object store to get dataset")
+            minio_client = Minio(
+                "minio-service.kubeflow.svc.cluster.local:9000",
+                access_key="minio",
+                secret_key="minio123",
+                secure=False
+            )
+
+            # Make sure the bucket exists
+            bucket_name = "air-quality-time-series-dataset"
+            if not minio_client.bucket_exists(bucket_name):
+                print(f"{bucket_name} bucket doesn't exist. Creating now...")
+                minio_client.make_bucket(bucket_name)
+                print(f"{bucket_name} bucket created successfully.")
+
+            # Load air quality dataset
+            minio_client.fget_object(
+                bucket_name=bucket_name,
+                object_name=minio_src_dataset_path,
+                file_path=src_data_path
+            )
+
+            df = pd.read_csv(src_data_path)
+            print('Dataset Info: ')
+            print(df.info())
+
+            print(f"Fetched dataset from mioio path {minio_src_dataset_path} to : {src_data_path}")
+
+            # Convert Timestamp column from object type to datetime
+            df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+
+            # Create new column to store the date extracted from datetime
+            df['Date'] = df["Timestamp"].dt.date
+            print(df.head())
+
+            # df_date is dataframe with average PM2.5 concentration for each day
+            df_date = pd.DataFrame(df.groupby('Date')['PM2.5'].mean())
+
+            # Save the processed data at out_data_path
+            df_date.to_csv(out_data_path, index=False)
+
+            print("***Completed pipeline component to load air quality dataset***")
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Load dataset and preprocess', description='')
+        _parser.add_argument("--minio-src-dataset-path", dest="minio_src_dataset_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--src-data-path", dest="src_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--out-data-path", dest="out_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = load_dataset_and_preprocess(**_parsed_args)
+      image: manglamsingh10/base-pod:latest
+      volumeMounts:
+      - {mountPath: /mnt/data, name: shared-pv-20240830181606}
+    inputs:
+      parameters:
+      - {name: shared-pv-20240830181606-name}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.22
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--minio-src-dataset-path", {"inputValue": "minio_src_dataset_path"},
+          "--src-data-path", {"inputValue": "src_data_path"}, "--out-data-path", {"inputValue":
+          "out_data_path"}], "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf
+          \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
+          "def load_dataset_and_preprocess(minio_src_dataset_path, src_data_path,
+          out_data_path):\n    import pandas as pd\n    from pathlib import Path\n    from
+          minio import Minio\n\n    print(\"***Staring pipeline component to load
+          air quality dataset***\")\n\n    # Create the directory if it does not exist\n    src_data_path_path
+          = Path(src_data_path)\n    src_data_path_path.parent.mkdir(parents=True,
+          exist_ok=True)\n\n    out_data_path_path = Path(out_data_path)\n    out_data_path_path.parent.mkdir(parents=True,
+          exist_ok=True)\n\n    print(\"Connecting to minio object store to get dataset\")\n    minio_client
+          = Minio(\n        \"minio-service.kubeflow.svc.cluster.local:9000\",\n        access_key=\"minio\",\n        secret_key=\"minio123\",\n        secure=False\n    )\n\n    #
+          Make sure the bucket exists\n    bucket_name = \"air-quality-time-series-dataset\"\n    if
+          not minio_client.bucket_exists(bucket_name):\n        print(f\"{bucket_name}
+          bucket doesn''t exist. Creating now...\")\n        minio_client.make_bucket(bucket_name)\n        print(f\"{bucket_name}
+          bucket created successfully.\")\n\n    # Load air quality dataset\n    minio_client.fget_object(\n        bucket_name=bucket_name,\n        object_name=minio_src_dataset_path,\n        file_path=src_data_path\n    )\n\n    df
+          = pd.read_csv(src_data_path)\n    print(''Dataset Info: '')\n    print(df.info())\n\n    print(f\"Fetched
+          dataset from mioio path {minio_src_dataset_path} to : {src_data_path}\")\n\n    #
+          Convert Timestamp column from object type to datetime\n    df[\"Timestamp\"]
+          = pd.to_datetime(df[\"Timestamp\"])\n\n    # Create new column to store
+          the date extracted from datetime\n    df[''Date''] = df[\"Timestamp\"].dt.date\n    print(df.head())\n\n    #
+          df_date is dataframe with average PM2.5 concentration for each day\n    df_date
+          = pd.DataFrame(df.groupby(''Date'')[''PM2.5''].mean())\n\n    # Save the
+          processed data at out_data_path\n    df_date.to_csv(out_data_path, index=False)\n\n    print(\"***Completed
+          pipeline component to load air quality dataset***\")\n\nimport argparse\n_parser
+          = argparse.ArgumentParser(prog=''Load dataset and preprocess'', description='''')\n_parser.add_argument(\"--minio-src-dataset-path\",
+          dest=\"minio_src_dataset_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--src-data-path\",
+          dest=\"src_data_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--out-data-path\",
+          dest=\"out_data_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = load_dataset_and_preprocess(**_parsed_args)\n"],
+          "image": "manglamsingh10/base-pod:latest"}}, "inputs": [{"name": "minio_src_dataset_path",
+          "type": "String"}, {"name": "src_data_path", "type": "String"}, {"name":
+          "out_data_path", "type": "String"}], "name": "Load dataset and preprocess"}',
+        pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"minio_src_dataset_path":
+          "dataset/air-quality-india.csv", "out_data_path": "/mnt/data/dataset/processed_dataset",
+          "src_data_path": "/mnt/data/dataset/air-quality-india.csv"}'}
+    volumes:
+    - name: shared-pv-20240830181606
+      persistentVolumeClaim: {claimName: '{{inputs.parameters.shared-pv-20240830181606-name}}'}
+  - name: model-serving
+    container:
+      args: [--model-save-path, /mnt/data/model/air_quality_model.h5]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def model_serving(model_save_path):
+            print("***Starting pipeline component to serve model via kserve***")
+
+            from kubernetes import client
+            from kserve import KServeClient
+            from kserve import constants
+            from kserve import utils
+            from kserve import V1beta1InferenceService
+            from kserve import V1beta1InferenceServiceSpec
+            from kserve import V1beta1PredictorSpec
+            from kserve import V1beta1TFServingSpec
+            from datetime import datetime
+
+            namespace = namespace = 'kubeflow-user-example-com'# utils.get_default_target_namespace()
+
+            print(f"Serving model from {model_save_path}")
+
+            name='air-quality-prediction-serving'
+            kserve_version='v1beta1'
+            api_version = constants.KSERVE_GROUP + '/' + kserve_version
+
+            isvc = V1beta1InferenceService(api_version=api_version,
+                                           kind=constants.KSERVE_KIND,
+                                           metadata=client.V1ObjectMeta(
+                                               name=name, namespace=namespace, annotations={'sidecar.istio.io/inject':'false'}),
+                                           spec=V1beta1InferenceServiceSpec(
+                                           predictor=V1beta1PredictorSpec(
+                                               service_account_name="sa-minio-kserve",
+                                               tensorflow=(V1beta1TFServingSpec(
+                                                   storage_uri="s3://air_quality/models/air_quality_predictor/"))))
+            )
+
+            KServe = KServeClient()
+            KServe.create(isvc)
+
+            print("***Completed kubeflow component to serve model via kserve***")
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Model serving', description='')
+        _parser.add_argument("--model-save-path", dest="model_save_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = model_serving(**_parsed_args)
+      image: manglamsingh10/base-pod:latest
+      volumeMounts:
+      - {mountPath: /mnt/data, name: shared-pv-20240830181606}
+    inputs:
+      parameters:
+      - {name: shared-pv-20240830181606-name}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.22
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--model-save-path", {"inputValue": "model_save_path"}], "command":
+          ["sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3
+          -u \"$program_path\" \"$@\"\n", "def model_serving(model_save_path):\n    print(\"***Starting
+          pipeline component to serve model via kserve***\")\n\n    from kubernetes
+          import client\n    from kserve import KServeClient\n    from kserve import
+          constants\n    from kserve import utils\n    from kserve import V1beta1InferenceService\n    from
+          kserve import V1beta1InferenceServiceSpec\n    from kserve import V1beta1PredictorSpec\n    from
+          kserve import V1beta1TFServingSpec\n    from datetime import datetime\n\n    namespace
+          = namespace = ''kubeflow-user-example-com''# utils.get_default_target_namespace()\n\n    print(f\"Serving
+          model from {model_save_path}\")\n\n    name=''air-quality-prediction-serving''\n    kserve_version=''v1beta1''\n    api_version
+          = constants.KSERVE_GROUP + ''/'' + kserve_version\n\n    isvc = V1beta1InferenceService(api_version=api_version,\n                                   kind=constants.KSERVE_KIND,\n                                   metadata=client.V1ObjectMeta(\n                                       name=name,
+          namespace=namespace, annotations={''sidecar.istio.io/inject'':''false''}),\n                                   spec=V1beta1InferenceServiceSpec(\n                                   predictor=V1beta1PredictorSpec(\n                                       service_account_name=\"sa-minio-kserve\",\n                                       tensorflow=(V1beta1TFServingSpec(\n                                           storage_uri=\"s3://air_quality/models/air_quality_predictor/\"))))\n    )\n\n    KServe
+          = KServeClient()\n    KServe.create(isvc)\n\n    print(\"***Completed kubeflow
+          component to serve model via kserve***\")\n\nimport argparse\n_parser =
+          argparse.ArgumentParser(prog=''Model serving'', description='''')\n_parser.add_argument(\"--model-save-path\",
+          dest=\"model_save_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = model_serving(**_parsed_args)\n"],
+          "image": "manglamsingh10/base-pod:latest"}}, "inputs": [{"name": "model_save_path",
+          "type": "String"}], "name": "Model serving"}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"model_save_path": "/mnt/data/model/air_quality_model.h5"}'}
+    volumes:
+    - name: shared-pv-20240830181606
+      persistentVolumeClaim: {claimName: '{{inputs.parameters.shared-pv-20240830181606-name}}'}
+  - name: predict
+    container:
+      args: [--dataset-path, /mnt/data/dataset/dataset/dataset.npz, --scaled-data-path,
+        /mnt/data/dataset/scaled/scaled_dataset.npz, --model-path, /mnt/data/model/air_quality_model.h5,
+        --predictions-path, /mnt/data/output/prediction/predictions.npz]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def predict(dataset_path, scaled_data_path, model_path, predictions_path):
+            import tensorflow as tf
+            import math
+            import numpy as np
+            from pathlib import Path
+            from sklearn.preprocessing import MinMaxScaler
+
+            print("***Starting pipeline component to predict***")
+
+            model_path_path = Path(model_path)
+            model_path_path.parent.mkdir(parents=True, exist_ok=True)
+
+            predictions_path_path = Path(predictions_path)
+            predictions_path_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # get dataset and scaled dataset
+            # Load the dataset_path data and model_train_scaled_data_path data
+            dataset_path_load = np.load(dataset_path, allow_pickle=True)
+            dataset = dataset_path_load['dataset']
+
+            scaled_data_path_path = np.load(scaled_data_path, allow_pickle=True)
+            scaled_data = scaled_data_path_path['scaled_data']
+
+            training_split = 0.8
+            num = 60
+            training_data_len = math.ceil(len(dataset) * training_split)
+
+            # Get scaled test data from scaled dataset
+            test_data = scaled_data[training_data_len - num:, :]
+            x_test = []
+            y_test = dataset[training_data_len:, :]
+            for i in range(num, len(test_data)):
+                x_test.append(test_data[i - num:i, 0])
+
+            x_test = np.array(x_test)
+            x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))
+
+            # Load the trained model
+            lstm_model = tf.keras.models.load_model(model_path)
+            print(f"Trained model is loaded from {model_path}")
+
+            # Predict on the test dataset
+            lstm_predictions = lstm_model.predict(x_test)
+
+            sc = MinMaxScaler(feature_range=(0, 1))
+            scaled_data = sc.fit_transform(dataset)
+            lstm_predictions = sc.inverse_transform(lstm_predictions)
+
+            # Save predictions and true value
+            np.savez_compressed(predictions_path, lstm_predictions=lstm_predictions, y_test=y_test)
+            print(f"Model predictions is saved at: {predictions_path}")
+
+            print("***Completed pipeline component to predict***")
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Predict', description='')
+        _parser.add_argument("--dataset-path", dest="dataset_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--scaled-data-path", dest="scaled_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--model-path", dest="model_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--predictions-path", dest="predictions_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = predict(**_parsed_args)
+      image: manglamsingh10/base-pod:latest
+      volumeMounts:
+      - {mountPath: /mnt/data, name: shared-pv-20240830181606}
+    inputs:
+      parameters:
+      - {name: shared-pv-20240830181606-name}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.22
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--dataset-path", {"inputValue": "dataset_path"}, "--scaled-data-path",
+          {"inputValue": "scaled_data_path"}, "--model-path", {"inputValue": "model_path"},
+          "--predictions-path", {"inputValue": "predictions_path"}], "command": ["sh",
+          "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3
+          -u \"$program_path\" \"$@\"\n", "def predict(dataset_path, scaled_data_path,
+          model_path, predictions_path):\n    import tensorflow as tf\n    import
+          math\n    import numpy as np\n    from pathlib import Path\n    from sklearn.preprocessing
+          import MinMaxScaler\n\n    print(\"***Starting pipeline component to predict***\")\n\n    model_path_path
+          = Path(model_path)\n    model_path_path.parent.mkdir(parents=True, exist_ok=True)\n\n    predictions_path_path
+          = Path(predictions_path)\n    predictions_path_path.parent.mkdir(parents=True,
+          exist_ok=True)\n\n    # get dataset and scaled dataset\n    # Load the dataset_path
+          data and model_train_scaled_data_path data\n    dataset_path_load = np.load(dataset_path,
+          allow_pickle=True)\n    dataset = dataset_path_load[''dataset'']\n\n    scaled_data_path_path
+          = np.load(scaled_data_path, allow_pickle=True)\n    scaled_data = scaled_data_path_path[''scaled_data'']\n\n    training_split
+          = 0.8\n    num = 60\n    training_data_len = math.ceil(len(dataset) * training_split)\n\n    #
+          Get scaled test data from scaled dataset\n    test_data = scaled_data[training_data_len
+          - num:, :]\n    x_test = []\n    y_test = dataset[training_data_len:, :]\n    for
+          i in range(num, len(test_data)):\n        x_test.append(test_data[i - num:i,
+          0])\n\n    x_test = np.array(x_test)\n    x_test = np.reshape(x_test, (x_test.shape[0],
+          x_test.shape[1], 1))\n\n    # Load the trained model\n    lstm_model = tf.keras.models.load_model(model_path)\n    print(f\"Trained
+          model is loaded from {model_path}\")\n\n    # Predict on the test dataset\n    lstm_predictions
+          = lstm_model.predict(x_test)\n\n    sc = MinMaxScaler(feature_range=(0,
+          1))\n    scaled_data = sc.fit_transform(dataset)\n    lstm_predictions =
+          sc.inverse_transform(lstm_predictions)\n\n    # Save predictions and true
+          value\n    np.savez_compressed(predictions_path, lstm_predictions=lstm_predictions,
+          y_test=y_test)\n    print(f\"Model predictions is saved at: {predictions_path}\")\n\n    print(\"***Completed
+          pipeline component to predict***\")\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Predict'',
+          description='''')\n_parser.add_argument(\"--dataset-path\", dest=\"dataset_path\",
+          type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--scaled-data-path\",
+          dest=\"scaled_data_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-path\",
+          dest=\"model_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--predictions-path\",
+          dest=\"predictions_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = predict(**_parsed_args)\n"],
+          "image": "manglamsingh10/base-pod:latest"}}, "inputs": [{"name": "dataset_path",
+          "type": "String"}, {"name": "scaled_data_path", "type": "String"}, {"name":
+          "model_path", "type": "String"}, {"name": "predictions_path", "type": "String"}],
+          "name": "Predict"}', pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"dataset_path":
+          "/mnt/data/dataset/dataset/dataset.npz", "model_path": "/mnt/data/model/air_quality_model.h5",
+          "predictions_path": "/mnt/data/output/prediction/predictions.npz", "scaled_data_path":
+          "/mnt/data/dataset/scaled/scaled_dataset.npz"}'}
+    volumes:
+    - name: shared-pv-20240830181606
+      persistentVolumeClaim: {claimName: '{{inputs.parameters.shared-pv-20240830181606-name}}'}
+  - name: shared-pv-20240830181606
+    resource:
+      action: create
+      manifest: |
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: '{{workflow.name}}-shared-pv-20240830181606'
+        spec:
+          accessModes:
+          - ReadWriteMany
+          resources:
+            requests:
+              storage: 150Gi
+    outputs:
+      parameters:
+      - name: shared-pv-20240830181606-manifest
+        valueFrom: {jsonPath: '{}'}
+      - name: shared-pv-20240830181606-name
+        valueFrom: {jsonPath: '{.metadata.name}'}
+      - name: shared-pv-20240830181606-size
+        valueFrom: {jsonPath: '{.status.capacity.storage}'}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.22
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+  - name: train-model
+    container:
+      args: [--model-train-data-path, /mnt/data/dataset/train/train.npz, --model-val-data-path,
+        /mnt/data/dataset/validation/val.npz, --model-save-path, /mnt/data/model/air_quality_model.h5,
+        --model-export-path, /mnt/data/model/serve/air_quality_model, --epochs, '10']
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def train_model(model_train_data_path, model_val_data_path, model_save_path, model_export_path,
+                        epochs = 10):
+            from keras import Sequential, Model
+            from keras.src.layers import LSTM, Dense
+
+            import numpy as np
+            from pathlib import Path
+            from minio import Minio
+            import os
+            import glob
+
+            print("***Starting pipeline component to train model***")
+
+            # Create the directory if it does not exist
+            model_save_path_path = Path(model_save_path)
+            model_save_path_path.parent.mkdir(parents=True, exist_ok=True)
+
+            model_export_path_path = Path(model_export_path)
+            model_export_path_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Load the training data and validation data
+            train_data = np.load(model_train_data_path, allow_pickle=True)
+            x_train_new, y_train_new = train_data['x_train'], train_data['y_train']
+
+            val_data = np.load(model_val_data_path, allow_pickle=True)
+            x_val, y_val = val_data['x_val'], val_data['y_val']
+
+            # Define a simple LSTM model
+            lstm_model = Sequential()
+            lstm_model.add(LSTM(50, return_sequences=True, input_shape=(60, 1)))
+            lstm_model.add(LSTM(50, return_sequences=False))
+            lstm_model.add(Dense(25))
+            lstm_model.add(Dense(1))
+            lstm_model.compile(optimizer='adam', loss='mean_squared_error')
+
+            print("Model summary:")
+            print(lstm_model.summary())
+
+            epochs_num = epochs
+            batch_size_num = 32
+            print(f"Model training started for epochs={epochs} with batch size: {batch_size_num}")
+
+            lstm_history = lstm_model.fit(x_train_new, y_train_new, batch_size=batch_size_num, epochs=epochs_num,
+                                          validation_data=(x_val, y_val))
+
+            # Save the model for test data prediction
+            lstm_model.save(model_save_path)
+            print(f"Trained model is saved at: {model_save_path}")
+
+            # Export model for real time prediction
+            lstm_model.export(model_export_path)
+            print(f"Trained model is exported at: {model_save_path} for realtime prediction.")
+
+            print("Connecting to minio object store to store dataset")
+            minio_client = Minio(
+                "minio-service.kubeflow.svc.cluster.local:9000",
+                access_key="minio",
+                secret_key="minio123",
+                secure=False
+            )
+            bucket_name = "air-quality-time-series-dataset"
+
+            def upload_local_directory_to_minio(local_path, bucket_name, minio_path):
+                assert os.path.isdir(local_path)
+
+                for local_file in glob.glob(local_path + '/**'):
+                    local_file = local_file.replace(os.sep, "/")  # Replace \ with / on Windows
+                    if not os.path.isfile(local_file):
+                        upload_local_directory_to_minio(
+                            local_file, bucket_name, minio_path + "/" + os.path.basename(local_file))
+                    else:
+                        remote_path = os.path.join(
+                            minio_path, local_file[1 + len(local_path):])
+                        remote_path = remote_path.replace(
+                            os.sep, "/")  # Replace \ with / on Windows
+                        minio_client.fput_object(bucket_name, remote_path, local_file)
+
+            upload_local_directory_to_minio(model_export_path, bucket_name, "models/lstm_timeseries/1/")  # 1 for version 1
+
+            print("Saved model to minIO")
+
+            print("***Completed pipeline component to train model***")
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Train model', description='')
+        _parser.add_argument("--model-train-data-path", dest="model_train_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--model-val-data-path", dest="model_val_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--model-save-path", dest="model_save_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--model-export-path", dest="model_export_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--epochs", dest="epochs", type=int, required=False, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = train_model(**_parsed_args)
+      image: manglamsingh10/base-pod:latest
+      volumeMounts:
+      - {mountPath: /mnt/data, name: shared-pv-20240830181606}
+    inputs:
+      parameters:
+      - {name: shared-pv-20240830181606-name}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.22
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--model-train-data-path", {"inputValue": "model_train_data_path"},
+          "--model-val-data-path", {"inputValue": "model_val_data_path"}, "--model-save-path",
+          {"inputValue": "model_save_path"}, "--model-export-path", {"inputValue":
+          "model_export_path"}, {"if": {"cond": {"isPresent": "epochs"}, "then": ["--epochs",
+          {"inputValue": "epochs"}]}}], "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf
+          \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
+          "def train_model(model_train_data_path, model_val_data_path, model_save_path,
+          model_export_path,\n                epochs = 10):\n    from keras import
+          Sequential, Model\n    from keras.src.layers import LSTM, Dense\n\n    import
+          numpy as np\n    from pathlib import Path\n    from minio import Minio\n    import
+          os\n    import glob\n\n    print(\"***Starting pipeline component to train
+          model***\")\n\n    # Create the directory if it does not exist\n    model_save_path_path
+          = Path(model_save_path)\n    model_save_path_path.parent.mkdir(parents=True,
+          exist_ok=True)\n\n    model_export_path_path = Path(model_export_path)\n    model_export_path_path.parent.mkdir(parents=True,
+          exist_ok=True)\n\n    # Load the training data and validation data\n    train_data
+          = np.load(model_train_data_path, allow_pickle=True)\n    x_train_new, y_train_new
+          = train_data[''x_train''], train_data[''y_train'']\n\n    val_data = np.load(model_val_data_path,
+          allow_pickle=True)\n    x_val, y_val = val_data[''x_val''], val_data[''y_val'']\n\n    #
+          Define a simple LSTM model\n    lstm_model = Sequential()\n    lstm_model.add(LSTM(50,
+          return_sequences=True, input_shape=(60, 1)))\n    lstm_model.add(LSTM(50,
+          return_sequences=False))\n    lstm_model.add(Dense(25))\n    lstm_model.add(Dense(1))\n    lstm_model.compile(optimizer=''adam'',
+          loss=''mean_squared_error'')\n\n    print(\"Model summary:\")\n    print(lstm_model.summary())\n\n    epochs_num
+          = epochs\n    batch_size_num = 32\n    print(f\"Model training started for
+          epochs={epochs} with batch size: {batch_size_num}\")\n\n    lstm_history
+          = lstm_model.fit(x_train_new, y_train_new, batch_size=batch_size_num, epochs=epochs_num,\n                                  validation_data=(x_val,
+          y_val))\n\n    # Save the model for test data prediction\n    lstm_model.save(model_save_path)\n    print(f\"Trained
+          model is saved at: {model_save_path}\")\n\n    # Export model for real time
+          prediction\n    lstm_model.export(model_export_path)\n    print(f\"Trained
+          model is exported at: {model_save_path} for realtime prediction.\")\n\n    print(\"Connecting
+          to minio object store to store dataset\")\n    minio_client = Minio(\n        \"minio-service.kubeflow.svc.cluster.local:9000\",\n        access_key=\"minio\",\n        secret_key=\"minio123\",\n        secure=False\n    )\n    bucket_name
+          = \"air-quality-time-series-dataset\"\n\n    def upload_local_directory_to_minio(local_path,
+          bucket_name, minio_path):\n        assert os.path.isdir(local_path)\n\n        for
+          local_file in glob.glob(local_path + ''/**''):\n            local_file =
+          local_file.replace(os.sep, \"/\")  # Replace \\ with / on Windows\n            if
+          not os.path.isfile(local_file):\n                upload_local_directory_to_minio(\n                    local_file,
+          bucket_name, minio_path + \"/\" + os.path.basename(local_file))\n            else:\n                remote_path
+          = os.path.join(\n                    minio_path, local_file[1 + len(local_path):])\n                remote_path
+          = remote_path.replace(\n                    os.sep, \"/\")  # Replace \\
+          with / on Windows\n                minio_client.fput_object(bucket_name,
+          remote_path, local_file)\n\n    upload_local_directory_to_minio(model_export_path,
+          bucket_name, \"models/lstm_timeseries/1/\")  # 1 for version 1\n\n    print(\"Saved
+          model to minIO\")\n\n    print(\"***Completed pipeline component to train
+          model***\")\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Train
+          model'', description='''')\n_parser.add_argument(\"--model-train-data-path\",
+          dest=\"model_train_data_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-val-data-path\",
+          dest=\"model_val_data_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-save-path\",
+          dest=\"model_save_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-export-path\",
+          dest=\"model_export_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--epochs\",
+          dest=\"epochs\", type=int, required=False, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = train_model(**_parsed_args)\n"],
+          "image": "manglamsingh10/base-pod:latest"}}, "inputs": [{"name": "model_train_data_path",
+          "type": "String"}, {"name": "model_val_data_path", "type": "String"}, {"name":
+          "model_save_path", "type": "String"}, {"name": "model_export_path", "type":
+          "String"}, {"default": "10", "name": "epochs", "optional": true, "type":
+          "Integer"}], "name": "Train model"}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"epochs": "10", "model_export_path":
+          "/mnt/data/model/serve/air_quality_model", "model_save_path": "/mnt/data/model/air_quality_model.h5",
+          "model_train_data_path": "/mnt/data/dataset/train/train.npz", "model_val_data_path":
+          "/mnt/data/dataset/validation/val.npz"}'}
+    volumes:
+    - name: shared-pv-20240830181606
+      persistentVolumeClaim: {claimName: '{{inputs.parameters.shared-pv-20240830181606-name}}'}
+  - name: train-test-split
+    container:
+      args: [--processed-data-path, /mnt/data/dataset/processed_dataset, --model-train-data-path,
+        /mnt/data/dataset/train/train.npz, --model-val-data-path, /mnt/data/dataset/validation/val.npz,
+        --dataset-path, /mnt/data/dataset/dataset/dataset.npz, --scaled-data-path,
+        /mnt/data/dataset/scaled/scaled_dataset.npz]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def train_test_split(processed_data_path, model_train_data_path, model_val_data_path,
+                             dataset_path, scaled_data_path):
+            import numpy as np
+            import pandas as pd
+            from sklearn.model_selection import train_test_split
+            from pathlib import Path
+            from sklearn.preprocessing import MinMaxScaler
+            import math
+
+            print("***Starting pipeline component to train_test_split dataset***")
+
+            # Create the directory if it does not exist
+            model_train_data_path_path = Path(model_train_data_path)
+            model_train_data_path_path.parent.mkdir(parents=True, exist_ok=True)
+
+            model_val_data_path_path = Path(model_val_data_path)
+            model_val_data_path_path.parent.mkdir(parents=True, exist_ok=True)
+
+            scaled_data_path_path = Path(scaled_data_path)
+            scaled_data_path_path.parent.mkdir(parents=True, exist_ok=True)
+
+            dataset_path_path = Path(dataset_path)
+            dataset_path_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Load the processed data
+            df_date = pd.read_csv(processed_data_path)
+
+            # df_date is dataframe with average PM2.5 concentration for each day
+            dataset = df_date.values
+
+            # split training data with first 80% of data
+            training_split = 0.8
+            training_data_len = math.ceil(len(dataset) * training_split)
+
+            # Min-Max data scaling for PM2.5 values
+            sc = MinMaxScaler(feature_range=(0, 1))
+            scaled_data = sc.fit_transform(dataset)
+
+            # Take previous 60 instance to predict next instance
+            # Here first i+60 instance becomes the input and next insatnce becomes the Y, and i is iterated over len(train_data) - 60
+            train_data = scaled_data[0:training_data_len, :]
+            x_train = []
+            y_train = []
+            num = 60
+            for i in range(num, len(train_data)):
+                x_train.append(train_data[i - num:i, 0])
+                y_train.append(train_data[i, 0])
+
+            # convert the list to numpy array and Reshape to (batch_size, time_steps, 1)
+            x_train, y_train = np.array(x_train), np.array(y_train)
+            x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
+            print('x_train data shape: ')
+            print(x_train.shape)
+
+            # Prepare validation dataset (x_val, y_val)
+            #  80% training data is futher splitted into 90% of the 80% for training and 10% of the 80% for validation,
+            train_split_index = int(len(x_train) * 0.9)
+
+            x_train_new = x_train[:train_split_index]
+            y_train_new = y_train[:train_split_index]
+
+            x_val = x_train[train_split_index:]
+            y_val = y_train[train_split_index:]
+
+            # Min-Max data scaling for PM2.5 values
+            sc = MinMaxScaler(feature_range=(0, 1))
+            scaled_data = sc.fit_transform(dataset)
+            print('PM2.5 Scaled Data: ')
+            print(scaled_data)
+
+            np.savez(model_train_data_path, x_train=x_train_new, y_train=y_train_new)
+            np.savez(model_val_data_path, x_val=x_val, y_val=y_val)
+            np.savez(scaled_data_path, scaled_data=scaled_data)
+            np.savez(dataset_path, dataset=dataset)
+
+            print(
+                f"Data split and train data is saved to {model_train_data_path} and validation data is saved to {model_val_data_path}")
+
+            print("***Completed pipeline component to train_test_split dataset***")
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Train test split', description='')
+        _parser.add_argument("--processed-data-path", dest="processed_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--model-train-data-path", dest="model_train_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--model-val-data-path", dest="model_val_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--dataset-path", dest="dataset_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--scaled-data-path", dest="scaled_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = train_test_split(**_parsed_args)
+      image: manglamsingh10/base-pod:latest
+      volumeMounts:
+      - {mountPath: /mnt/data, name: shared-pv-20240830181606}
+    inputs:
+      parameters:
+      - {name: shared-pv-20240830181606-name}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.22
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--processed-data-path", {"inputValue": "processed_data_path"},
+          "--model-train-data-path", {"inputValue": "model_train_data_path"}, "--model-val-data-path",
+          {"inputValue": "model_val_data_path"}, "--dataset-path", {"inputValue":
+          "dataset_path"}, "--scaled-data-path", {"inputValue": "scaled_data_path"}],
+          "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\" >
+          \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def train_test_split(processed_data_path,
+          model_train_data_path, model_val_data_path,\n                     dataset_path,
+          scaled_data_path):\n    import numpy as np\n    import pandas as pd\n    from
+          sklearn.model_selection import train_test_split\n    from pathlib import
+          Path\n    from sklearn.preprocessing import MinMaxScaler\n    import math\n\n    print(\"***Starting
+          pipeline component to train_test_split dataset***\")\n\n    # Create the
+          directory if it does not exist\n    model_train_data_path_path = Path(model_train_data_path)\n    model_train_data_path_path.parent.mkdir(parents=True,
+          exist_ok=True)\n\n    model_val_data_path_path = Path(model_val_data_path)\n    model_val_data_path_path.parent.mkdir(parents=True,
+          exist_ok=True)\n\n    scaled_data_path_path = Path(scaled_data_path)\n    scaled_data_path_path.parent.mkdir(parents=True,
+          exist_ok=True)\n\n    dataset_path_path = Path(dataset_path)\n    dataset_path_path.parent.mkdir(parents=True,
+          exist_ok=True)\n\n    # Load the processed data\n    df_date = pd.read_csv(processed_data_path)\n\n    #
+          df_date is dataframe with average PM2.5 concentration for each day\n    dataset
+          = df_date.values\n\n    # split training data with first 80% of data\n    training_split
+          = 0.8\n    training_data_len = math.ceil(len(dataset) * training_split)\n\n    #
+          Min-Max data scaling for PM2.5 values\n    sc = MinMaxScaler(feature_range=(0,
+          1))\n    scaled_data = sc.fit_transform(dataset)\n\n    # Take previous
+          60 instance to predict next instance\n    # Here first i+60 instance becomes
+          the input and next insatnce becomes the Y, and i is iterated over len(train_data)
+          - 60\n    train_data = scaled_data[0:training_data_len, :]\n    x_train
+          = []\n    y_train = []\n    num = 60\n    for i in range(num, len(train_data)):\n        x_train.append(train_data[i
+          - num:i, 0])\n        y_train.append(train_data[i, 0])\n\n    # convert
+          the list to numpy array and Reshape to (batch_size, time_steps, 1)\n    x_train,
+          y_train = np.array(x_train), np.array(y_train)\n    x_train = np.reshape(x_train,
+          (x_train.shape[0], x_train.shape[1], 1))\n    print(''x_train data shape:
+          '')\n    print(x_train.shape)\n\n    # Prepare validation dataset (x_val,
+          y_val)\n    #  80% training data is futher splitted into 90% of the 80%
+          for training and 10% of the 80% for validation,\n    train_split_index =
+          int(len(x_train) * 0.9)\n\n    x_train_new = x_train[:train_split_index]\n    y_train_new
+          = y_train[:train_split_index]\n\n    x_val = x_train[train_split_index:]\n    y_val
+          = y_train[train_split_index:]\n\n    # Min-Max data scaling for PM2.5 values\n    sc
+          = MinMaxScaler(feature_range=(0, 1))\n    scaled_data = sc.fit_transform(dataset)\n    print(''PM2.5
+          Scaled Data: '')\n    print(scaled_data)\n\n    np.savez(model_train_data_path,
+          x_train=x_train_new, y_train=y_train_new)\n    np.savez(model_val_data_path,
+          x_val=x_val, y_val=y_val)\n    np.savez(scaled_data_path, scaled_data=scaled_data)\n    np.savez(dataset_path,
+          dataset=dataset)\n\n    print(\n        f\"Data split and train data is
+          saved to {model_train_data_path} and validation data is saved to {model_val_data_path}\")\n\n    print(\"***Completed
+          pipeline component to train_test_split dataset***\")\n\nimport argparse\n_parser
+          = argparse.ArgumentParser(prog=''Train test split'', description='''')\n_parser.add_argument(\"--processed-data-path\",
+          dest=\"processed_data_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-train-data-path\",
+          dest=\"model_train_data_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model-val-data-path\",
+          dest=\"model_val_data_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--dataset-path\",
+          dest=\"dataset_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--scaled-data-path\",
+          dest=\"scaled_data_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = train_test_split(**_parsed_args)\n"],
+          "image": "manglamsingh10/base-pod:latest"}}, "inputs": [{"name": "processed_data_path",
+          "type": "String"}, {"name": "model_train_data_path", "type": "String"},
+          {"name": "model_val_data_path", "type": "String"}, {"name": "dataset_path",
+          "type": "String"}, {"name": "scaled_data_path", "type": "String"}], "name":
+          "Train test split"}', pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"dataset_path":
+          "/mnt/data/dataset/dataset/dataset.npz", "model_train_data_path": "/mnt/data/dataset/train/train.npz",
+          "model_val_data_path": "/mnt/data/dataset/validation/val.npz", "processed_data_path":
+          "/mnt/data/dataset/processed_dataset", "scaled_data_path": "/mnt/data/dataset/scaled/scaled_dataset.npz"}'}
+    volumes:
+    - name: shared-pv-20240830181606
+      persistentVolumeClaim: {claimName: '{{inputs.parameters.shared-pv-20240830181606-name}}'}
+  arguments:
+    parameters:
+    - {name: epochs, value: '1'}
+  serviceAccountName: pipeline-runner
